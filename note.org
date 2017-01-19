@@ -1,0 +1,27 @@
+
+
+** The EBNF for PL241.
+| non-terminal         | first                        | follow |
+|----------------------+------------------------------+--------|
+| computation          | main                         |        |
+|----------------------+------------------------------+--------|
+| function body        | var, array, (                |        |
+| function declaration | function, procedure          |        |
+| formal parameter     | (                            |        |
+| variable declaration | var, array                   |        |
+| type declaration     | var, array                   |        |
+|----------------------+------------------------------+--------|
+| designator           | ident                        |        |
+| factor               | ident, number, (, call       |        |
+| term                 | ident, number, (, call       |        |
+| expression           | ident, number, (, call       |        |
+| relation             | ident, number, (, call       |        |
+|----------------------+------------------------------+--------|
+| assignment           | let                          |        |
+| function call        | call                         |        |
+| if statement         | if                           |        |
+| while statement      | while                        |        |
+| return statement     | return                       |        |
+|----------------------+------------------------------+--------|
+| statement            | let, call, if, while, return |        |
+| statement sequence   | let, call, if, while, return |        |
