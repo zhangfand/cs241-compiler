@@ -1,12 +1,15 @@
 package edu.zhangfan.compiler.frontend;
 
 import com.google.common.collect.ImmutableSet;
-import edu.zhangfan.compiler.Utils;
 
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.function.Predicate;
 
+
+/**
+ * TODO performance optimization
+ * 1. reduce the number of times checking if a NT is fulfilled.
+ */
 
 class Summary {
     Integer value;
@@ -72,10 +75,19 @@ class Grammar {
         scanner.next();
     }
 
-    static Summary consume(Production p) throws SyntaxError {
-        return p.consume();
+    static Summary consume(Production... productions) throws SyntaxError {
+        for (Production production : productions) {
+            if (fulfill(production)) {
+                return production.consume();
+            }
+        }
+        error();
+        return null;
     }
 
+    static void error() throws SyntaxError {
+        throw new SyntaxError();
+    }
 
     static private Predicate<Terminal> is(Terminal terminal) {
         return (t) -> t == terminal;
@@ -91,16 +103,13 @@ class Grammar {
         return terminalSet::contains;
     }
 
-    static void error() throws SyntaxError {
-        throw new SyntaxError();
-    }
 
     // todo identifier and number should be terminal.
     final static Production IDENTIFIER = new Production(ImmutableSet.of(Terminal.IDENTIFIER), Grammar::identifierRule);
 
     static private Summary identifierRule() throws SyntaxError {
         // todo identifier summary
-        assure(is(Terminal.IDENTIFIER));
+        assure(Terminal.IDENTIFIER);
         Summary summary = new Summary(scanner.peek().value);
 
         scanner.next();
@@ -111,7 +120,7 @@ class Grammar {
     final static Production NUMBER = new Production(ImmutableSet.of(Terminal.NUMBER), Grammar::numberRule);
 
     static private Summary numberRule() throws SyntaxError {
-        assure(is(Terminal.NUMBER));
+        assure(Terminal.NUMBER);
         Integer value = scanner.peek().value;
         scanner.next();
         return new Summary(value);
@@ -120,20 +129,15 @@ class Grammar {
     final static Production DESIGNATOR = new Production(ImmutableSet.of(Terminal.IDENTIFIER), Grammar::designatorRule);
 
     static private Summary designatorRule() throws SyntaxError {
-        if (scanner.peek().terminal == Terminal.IDENTIFIER) {
-            while (scanner.peek().terminal == Terminal.LEFT_BRACKET) {
-                scanner.next();
-                EXPRESSSION.consume();
-                if (scanner.peek().terminal == Terminal.LEFT_BRACKET) {
-                    scanner.next();
-                } else {
-                    error();
-                }
-            }
-        } else {
-            error();
+        Summary summary = consume(IDENTIFIER);
+
+        while (fulfill(Terminal.LEFT_BRACKET)) {
+            scanner.next();
+            consume(EXPRESSSION);
+            consume(Terminal.RIGHT_BRACKET);
         }
-        return null;
+
+        return summary;
     }
 
     final static Production FACTOR = new Production(
@@ -143,31 +147,12 @@ class Grammar {
     static private Summary factorRule() throws SyntaxError {
         Summary summary = null;
 
-        switch (scanner.peek().terminal) {
-            case IDENTIFIER:
-                summary = DESIGNATOR.consume();
-                break;
-
-            case NUMBER:
-                summary = NUMBER.consume();
-                break;
-
-            case LEFT_PAREN:
-                scanner.next();
-                summary = EXPRESSSION.consume();
-                if (fulfill(is(Terminal.RIGHT_PAREN))) {
-                    scanner.next();
-                } else {
-                    error();
-                }
-                break;
-
-            case CALL:
-                summary = FUNCTION_CALL.consume();
-                break;
-
-            default:
-                error();
+        if (fulfill(Terminal.LEFT_PAREN)) {
+            scanner.next();
+            summary = consume(EXPRESSSION);
+            consume(Terminal.RIGHT_PAREN);
+        } else {
+            summary = consume(DESIGNATOR, NUMBER, FUNCTION_CALL);
         }
 
         return summary;
@@ -178,12 +163,13 @@ class Grammar {
             Grammar::termRule);
 
     static private Summary termRule() throws SyntaxError {
-        Summary summary = FACTOR.consume();
+        Summary summary = consume(FACTOR);
+        Summary operand = null;
 
-        while (fulfill(isOneOf(Terminal.MULTIPLY, Terminal.DIVIDE))) {
+        while (fulfill(Terminal.MULTIPLY, Terminal.DIVIDE)) {
             scanner.next();
-            // TODO
-            FACTOR.consume();
+            // todo summary
+            operand = consume(FACTOR);
         }
 
         return summary;
@@ -194,11 +180,12 @@ class Grammar {
             Grammar::expressionRule);
 
     static private Summary expressionRule() throws SyntaxError {
-        Summary summary = TERM.consume();
-        while (fulfill(isOneOf(Terminal.PLUS, Terminal.MINUS))) {
+        Summary summary = consume(TERM);
+        Summary operand = null;
+        while (fulfill(Terminal.PLUS, Terminal.MINUS)) {
             scanner.next();
-            // TODO
-            TERM.consume();
+            // TODO summary
+            operand = consume(TERM);
         }
 
         return summary;
@@ -210,7 +197,7 @@ class Grammar {
 
     static private Summary relationRule() throws SyntaxError {
         Summary summary = EXPRESSSION.consume();
-        if (Terminal.isRelOp(scanner.peek().terminal)) {
+        if (fulfill(Terminal::isRelOp)) {
             Terminal relOp = scanner.peek().terminal;
             scanner.next();
 
@@ -246,16 +233,10 @@ class Grammar {
     static private Summary assignmentRule() throws SyntaxError {
         Summary summary = null;
 
-        if (scanner.peek().terminal == Terminal.LET) {
-            scanner.next();
-            DESIGNATOR.consume();
-            if (fulfill(is(Terminal.ASSIGNMENT))) {
-                scanner.next();
-                EXPRESSSION.consume();
-            } else {
-                error();
-            }
-        }
+        consume(Terminal.LET);
+        consume(DESIGNATOR);
+        consume(Terminal.ASSIGNMENT);
+        consume(EXPRESSSION);
 
         return summary;
     }
@@ -264,21 +245,19 @@ class Grammar {
 
     static private Summary functionCallRule() throws SyntaxError {
         Summary summary = null;
-        assure(is(Terminal.CALL));
-        scanner.next();
-        summary = IDENTIFIER.consume();
+        consume(Terminal.CALL);
+        consume(IDENTIFIER);
 
-        if (fulfill(is(Terminal.LEFT_PAREN))) {
+        if (fulfill(Terminal.LEFT_PAREN)) {
             scanner.next();
-            if (fulfill(isOneOf(EXPRESSSION.first))) {
+            if (fulfill(EXPRESSSION)) {
                 EXPRESSSION.consume();
-                while (fulfill(is(Terminal.COMMA))) {
+                while (fulfill(Terminal.COMMA)) {
                     scanner.next();
-                    EXPRESSSION.consume();
+                    consume(EXPRESSSION);
                 }
             }
-            assure(is(Terminal.RIGHT_PAREN));
-            scanner.next();
+            consume(Terminal.RIGHT_PAREN);
         }
 
         return summary;
@@ -289,83 +268,62 @@ class Grammar {
     static private Summary ifStatementRule() throws SyntaxError {
         Summary summary = null;
 
-        assure(is(Terminal.IF));
-        scanner.next();
+        consume(Terminal.IF);
+        consume(RELATION);
 
-        RELATION.consume();
+        consume(Terminal.THEN);
 
-        assure(is(Terminal.THEN));
-        scanner.next();
+        consume(STATEMENT_SEQUENCE);
 
-        statementSequence.consume();
-
-        if (fulfill(is(Terminal.ELSE))) {
+        if (fulfill(Terminal.ELSE)) {
             scanner.next();
-            statementSequence.consume();
+            consume(STATEMENT_SEQUENCE);
         }
 
-        assure(is(Terminal.FI));
-        scanner.next();
+        consume(Terminal.FI);
 
         return summary;
     }
 
-    final static Production whileStatement = new Production(ImmutableSet.of(Terminal.WHILE), Grammar::whileStatementRule);
+    final static Production WHILE_STATEMENT = new Production(ImmutableSet.of(Terminal.WHILE), Grammar::whileStatementRule);
 
     static private Summary whileStatementRule() throws SyntaxError {
         Summary summary = null;
 
-        assure(is(Terminal.WHILE));
-        scanner.next();
-
-        RELATION.consume();
-
-        assure(is(Terminal.DO));
-        scanner.next();
-
-        statementSequence.consume();
-
-        assure(is(Terminal.OD));
-        scanner.next();
+        consume(Terminal.WHILE);
+        consume(RELATION);
+        consume(Terminal.DO);
+        consume(STATEMENT_SEQUENCE);
+        consume(Terminal.OD);
 
         return summary;
     }
 
-    final static Production returnStatement = new Production(ImmutableSet.of(Terminal.RETURN), Grammar::returnStatementRule);
+    final static Production RETURN_STATEMENT = new Production(ImmutableSet.of(Terminal.RETURN), Grammar::returnStatementRule);
 
     static private Summary returnStatementRule() throws SyntaxError {
         Summary summary = null;
 
-        assure(is(Terminal.RETURN));
+        consume(Terminal.RETURN);
 
-        if (fulfill(isOneOf(EXPRESSSION.first))) {
-            EXPRESSSION.consume();
+        if (fulfill(EXPRESSSION)) {
+            consume(EXPRESSSION);
         }
 
         return summary;
     }
 
-    final static Production COMPUTATION = new Production(ImmutableSet.of(Terminal.MAIN), Grammar::computationRule);
-
-    final static Production statement = new Production(
+    final static Production STATEMENT = new Production(
             ImmutableSet.of(Terminal.LET, Terminal.CALL, Terminal.IF, Terminal.WHILE, Terminal.RETURN),
             Grammar::statementRule);
 
     static private Summary statementRule() throws SyntaxError {
         Summary summary = null;
-
-        for (Production p : Arrays.asList(ASSIGNMENT, FUNCTION_CALL, IF_STATEMENT, whileStatement, returnStatement)) {
-            if (fulfill(isOneOf(p.first))) {
-                summary = p.consume();
-                return summary;
-            }
-        }
-
-        error();
+        consume(ASSIGNMENT, FUNCTION_CALL, IF_STATEMENT, WHILE_STATEMENT, RETURN_STATEMENT);
         return summary;
     }
 
-    final static Production statementSequence = new Production(
+    final static Production STATEMENT_SEQUENCE = new Production(
             ImmutableSet.of(Terminal.LET, Terminal.CALL, Terminal.IF, Terminal.WHILE, Terminal.RETURN),
             Grammar::statementSequenceRule);
 
@@ -373,130 +331,117 @@ class Grammar {
         // todo summary
         Summary summary = null;
 
-        statement.consume();
+        consume(STATEMENT);
 
-        while (fulfill(is(Terminal.SEMICOLON))) {
-            statement.consume();
+        while (fulfill(Terminal.SEMICOLON)) {
+            scanner.next();
+            consume(STATEMENT);
         }
 
         return summary;
     }
 
-    final static Production typeDeclaration = new Production(
+    final static Production TYPE_DECLARATION = new Production(
             ImmutableSet.of(Terminal.VAR, Terminal.ARRAY), Grammar::typeDeclarationRule);
 
     static private Summary typeDeclarationRule() throws SyntaxError {
         // todo summary
         Summary summary = null;
 
-        assure(isOneOf(typeDeclaration.first));
-        scanner.next();
+        consume(Terminal.VAR, Terminal.ARRAY);
+        consume(Terminal.LEFT_BRACKET);
+        consume(NUMBER);
+        consume(Terminal.RIGHT_BRACKET);
 
-        assure(is(Terminal.LEFT_BRACKET));
-        scanner.next();
-
-        NUMBER.consume();
-
-        assure(is(Terminal.RIGHT_BRACKET));
-        scanner.next();
-
-        while (fulfill(is(Terminal.LEFT_BRACKET))) {
+        while (fulfill(Terminal.LEFT_BRACKET)) {
             scanner.next();
 
             NUMBER.consume();
 
-            assure(is(Terminal.RIGHT_BRACKET));
-            scanner.next();
+            consume(Terminal.RIGHT_BRACKET);
         }
 
         return summary;
     }
 
-    final static Production variableDeclaration = new Production(ImmutableSet.of(Terminal.IDENTIFIER), Grammar::variableDeclarationRule);
+    final static Production VARIABLE_DECLARATION = new Production(
+            ImmutableSet.of(Terminal.VAR, Terminal.ARRAY), Grammar::variableDeclarationRule);
 
     static private Summary variableDeclarationRule() throws SyntaxError {
         // todo summary
         Summary summary = null;
 
-        typeDeclaration.consume();
+        consume(TYPE_DECLARATION);
+        consume(IDENTIFIER);
 
-        IDENTIFIER.consume();
-
-        while (fulfill(is(Terminal.COMMA))) {
+        while (fulfill(Terminal.COMMA)) {
             scanner.next();
-            IDENTIFIER.consume();
+            consume(IDENTIFIER);
         }
 
-        assure(is(Terminal.SEMICOLON));
-        scanner.next();
+        consume(Terminal.SEMICOLON);
 
         return summary;
     }
 
-    final static Production functionDeclaration = new Production(ImmutableSet.of(Terminal.IDENTIFIER), Grammar::functionDeclarationRule);
+    final static Production FUNCTION_DECLARATION = new Production(
+            ImmutableSet.of(Terminal.FUNCTION, Terminal.PROCEDURE), Grammar::functionDeclarationRule);
 
     static private Summary functionDeclarationRule() throws SyntaxError {
         // todo summary
         Summary summary = null;
 
-        assure(isOneOf(Terminal.FUNCTION, Terminal.PROCEDURE));
-        scanner.next();
+        consume(Terminal.FUNCTION, Terminal.PROCEDURE);
 
-        IDENTIFIER.consume();
+        consume(IDENTIFIER);
 
-        if (fulfill(formalParameter)) {
-            formalParameter.consume();
+        if (fulfill(FORMAL_PARAMETER)) {
+            consume(FORMAL_PARAMETER);
         }
 
-        assure(Terminal.SEMICOLON);
-        scanner.next();
-
-        functionBody.consume();
-
-        assure(Terminal.SEMICOLON);
-        scanner.next();
+        consume(Terminal.SEMICOLON);
+        consume(FUNCTION_BODY);
+        consume(Terminal.SEMICOLON);
 
         return summary;
     }
 
-    final static Production formalParameter = new Production(ImmutableSet.of(Terminal.IDENTIFIER), Grammar::formalParameterRule);
+    final static Production FORMAL_PARAMETER = new Production(
+            ImmutableSet.of(Terminal.LEFT_PAREN), Grammar::formalParameterRule);
 
     static private Summary formalParameterRule() throws SyntaxError {
         // todo summary
         Summary summary = null;
 
-        assure(Terminal.LEFT_PAREN);
-        scanner.next();
+        consume(Terminal.LEFT_PAREN);
 
         if (fulfill(IDENTIFIER)) {
-            IDENTIFIER.consume();
+            consume(IDENTIFIER);
             while (fulfill(Terminal.COMMA)) {
                 scanner.next();
-                IDENTIFIER.consume();
+                consume(IDENTIFIER);
             }
         }
 
-        assure(Terminal.RIGHT_PAREN);
-        scanner.next();
-
+        consume(Terminal.RIGHT_PAREN);
         return summary;
     }
 
-    final static Production functionBody = new Production(ImmutableSet.of(Terminal.IDENTIFIER), Grammar::functionBodyRule);
+    final static Production FUNCTION_BODY = new Production(
+            ImmutableSet.of(Terminal.VAR, Terminal.ARRAY, Terminal.LEFT_BRACE), Grammar::functionBodyRule);
 
     static private Summary functionBodyRule() throws SyntaxError {
         // todo summary
         Summary summary = null;
 
-        while (fulfill(variableDeclaration)) {
-            variableDeclaration.consume();
+        while (fulfill(VARIABLE_DECLARATION)) {
+            consume(VARIABLE_DECLARATION);
         }
 
-        assure(Terminal.LEFT_BRACE);
-        scanner.next();
+        consume(Terminal.LEFT_BRACE);
 
-        if (fulfill(statementSequence)) {
-            statementSequence.consume();
+        if (fulfill(STATEMENT_SEQUENCE)) {
+            consume(STATEMENT_SEQUENCE);
         }
 
         consume(Terminal.RIGHT_BRACE);
@@ -504,7 +449,7 @@ class Grammar {
         return summary;
     }
 
-    final static Production computation = new Production(ImmutableSet.of(Terminal.IDENTIFIER), Grammar::computationRule);
+    final static Production COMPUTATION = new Production(ImmutableSet.of(Terminal.MAIN), Grammar::computationRule);
 
     static private Summary computationRule() throws SyntaxError {
         // todo summary
@@ -512,17 +457,17 @@ class Grammar {
 
         consume(Terminal.MAIN);
 
-        while (fulfill(variableDeclaration)) {
-            consume(variableDeclaration);
+        while (fulfill(VARIABLE_DECLARATION)) {
+            consume(VARIABLE_DECLARATION);
         }
 
-        while (fulfill(functionDeclaration)) {
-            consume(functionDeclaration);
+        while (fulfill(FUNCTION_DECLARATION)) {
+            consume(FUNCTION_DECLARATION);
         }
 
         consume(Terminal.LEFT_BRACE);
 
-        consume(statementSequence);
+        consume(STATEMENT_SEQUENCE);
 
         consume(Terminal.RIGHT_BRACE);
 
